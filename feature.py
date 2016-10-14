@@ -7,6 +7,7 @@ from scipy import signal
 import mdp
 import os
 import json
+import cv2
 
 MAXDIM = 500
 
@@ -88,18 +89,19 @@ def get_feature_size():
     return MAXDIM
 
 
-def get_feature(image_path, recalc=False, return_image=True):
+def get_feature(image_path, values=[1,0,0,0,1,0], recalc=False, return_image=False):
     data_path = image_path.rsplit('.', 1)[0] + '.npy'
     if not recalc and os.path.isfile(data_path):
         return np.load(data_path)
 
-    desp = calculate_feature(image_path)#, return_image=True)
+    desp = calculate_feature(image_path, value=values, return_image=return_image)
 
     np.save(data_path, desp)
     return desp
 
 
-def calculate_feature(image_path):
+def calculate_feature(image_path, value=[1,0,0,0,1,0], return_image=False):
+    debug_image = []
     vmin = 0
     k = 0
 
@@ -170,16 +172,21 @@ def calculate_feature(image_path):
     imgCR = scipy.ndimage.filters.gaussian_filter(red, 1, mode='reflect', cval=0.0)
     imgCG = scipy.ndimage.filters.gaussian_filter(blue, 1, mode='reflect', cval=0.0)
     imgCB = scipy.ndimage.filters.gaussian_filter(green, 1, mode='reflect', cval=0.0)
+    imgCC = scipy.ndimage.filters.gaussian_filter(red*value[0] + green*value[1] + blue*value[2], 1, mode='reflect', cval=0.0)
+    debug_image.append(imgCC)
 
     imgSR = scipy.ndimage.filters.gaussian_filter(red, 3, mode='reflect', cval=0.0)
     imgSB = scipy.ndimage.filters.gaussian_filter(blue, 3, mode='reflect', cval=0.0)
     imgSG = scipy.ndimage.filters.gaussian_filter(green, 3, mode='reflect', cval=0.0)
+    imgSC = scipy.ndimage.filters.gaussian_filter(red*value[3] + green*value[4] + blue*value[5], 3, mode='reflect', cval=0.0)
+    debug_image.append(imgSC)
 
-    imgR_G = imgCR - imgSG
-    imgG_R = imgCG - imgSR
+    #imgR_G = imgCR - imgSG
+    #imgG_R = imgCG - imgSR
+    imgC_C = imgCC - imgSC
 
-    imgB_Y = imgCB - 0.5 * (imgSG + imgSR)
-    imgY_B = 0.5 * (imgCG + imgCR) - imgSB
+    #imgB_Y = imgCB - 0.5 * (imgSG + imgSR)
+    #imgY_B = 0.5 * (imgCG + imgCR) - imgSB
 
     # Convolve with Gabor kernels
     '''
@@ -190,18 +197,21 @@ def calculate_feature(image_path):
     im_left = signal.convolve2d(imgR_G,gabor45_odd,boundary='symm', mode='full')**2 +  signal.convolve2d(imgR_G,gabor45_even,boundary='symm', mode='full')**2
     '''
 
-    im_cent = signal.convolve2d(imgR_G, gabor0_odd, boundary='symm', mode='full') ** 2 + signal.convolve2d(imgR_G,
-                                                                                                           gabor0_even,
-                                                                                                           boundary='symm',
-                                                                                                           mode='full') ** 2
+    #im_cent = signal.convolve2d(imgR_G, gabor0_odd, boundary='symm', mode='full') ** 2 + signal.convolve2d(imgR_G,
+    #                                                                                                       gabor0_even,
+    #                                                                                                       boundary='symm',
+    #                                                                                                       mode='full') ** 2
 
-    im_right = signal.convolve2d(imgR_G, gabor135_odd, boundary='symm', mode='full') ** 2 + signal.convolve2d(imgR_G,
-                                                                                                              gabor135_even,
-                                                                                                              boundary='symm',
-                                                                                                              mode='full') ** 2
+    #im_right = signal.convolve2d(imgR_G, gabor135_odd, boundary='symm', mode='full') ** 2 + signal.convolve2d(imgR_G,
+    #                                                                                                          gabor135_even,
+    #                                                                                                          boundary='symm',
+    #                                                                                                          mode='full') ** 2
+    #im_left = np.absolute(signal.convolve2d(imgR_G, scharr, boundary='symm', mode='same'))
+    #im_left = (im_left - np.min(np.min(im_left))) / (np.max(np.max(im_left) - np.min(np.min(im_left))))
 
-    im_left = np.absolute(signal.convolve2d(imgR_G, scharr, boundary='symm', mode='same'))
+    im_left = np.absolute(signal.convolve2d(imgC_C, scharr, boundary='symm', mode='same'))
     im_left = (im_left - np.min(np.min(im_left))) / (np.max(np.max(im_left) - np.min(np.min(im_left))))
+    debug_image.append(im_left)
 
 
     desp = getMaxActivated(im_left, MAXDIM)
@@ -216,6 +226,12 @@ def calculate_feature(image_path):
         ax.scatter([ycord], [xcord], marker='x', color='r')
     plt.show()
     """
+    for i in xrange(len(debug_image)):
+        debug_image[i] = cv2.resize(debug_image[i], None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+
+    if return_image:
+        return (desp, debug_image)
+
     return desp
 
 

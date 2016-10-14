@@ -10,6 +10,28 @@ import os
 import numpy as np
 
 
+def concatenate(image1, image2, horizontal=False):
+    h1, w1 = image1.shape[:2]
+    h2, w2 = image2.shape[:2]
+    size = image1.shape[2] if len(image1.shape) > 2 else 1
+
+    if horizontal:
+        if size == 1:
+            vis = np.zeros((max(h1, h2), w1 + w2), np.uint8)
+        else:
+            vis = np.zeros((max(h1, h2), w1 + w2, size), np.uint8)
+        vis[:h1, :w1] = image1
+        vis[:h2, w1:w1 + w2] = image2
+    else:
+        if size == 1:
+            vis = np.zeros((h1 + h2, max(w1, w2)), np.uint8)
+        else:
+            vis = np.zeros((h1 + h2, max(w1, w2), size), np.uint8)
+        vis[:h1, :w1] = image1
+        vis[h1:h1 + h2, :w2] = image2
+    return vis
+
+
 model_file = 'model.pkl'
 
 net = pickle.load(open(model_file, 'rb'))
@@ -24,9 +46,31 @@ total = 0
 i=0
 do_all = False
 
+cv2.namedWindow('values')
+def nothing(x):
+    pass
+cv2.createTrackbar('values0', 'values', 1000, 1000, nothing)
+cv2.createTrackbar('values1', 'values', 0, 1000, nothing)
+#cv2.createTrackbar('values2', 'values', 0, 1000, nothing)
+cv2.createTrackbar('values3', 'values', 0, 1000, nothing)
+cv2.createTrackbar('values4', 'values', 1000, 1000, nothing)
+#cv2.createTrackbar('values5', 'values', 0, 1000, nothing)
+
 while True:
     image_path = images_path[i]
-    features = feature.get_feature(image_path, recalc=True, return_image=True)
+
+    values = []
+    values.append(float(cv2.getTrackbarPos('values0', 'values'))/1000.0)
+    values.append(float(cv2.getTrackbarPos('values1', 'values'))/1000.0)
+    #values.append(float(cv2.getTrackbarPos('values2', 'values'))/1000.0)
+    values.append(1-(values[0]+values[1]))
+    values.append(float(cv2.getTrackbarPos('values3', 'values'))/1000.0)
+    values.append(float(cv2.getTrackbarPos('values4', 'values'))/1000.0)
+    values.append(1-(values[3]+values[4]))
+    #values.append(float(cv2.getTrackbarPos('values5', 'values'))/1000.0)
+    print values
+
+    features, debug_image = feature.get_feature(image_path, values=values, recalc=True, return_image=True)
     if features is None:
         continue
 
@@ -71,10 +115,17 @@ while True:
             y = np.floor(f / shape[1])/resize
             x =(f % shape[1])/resize
             cv2.circle(image, (int(x) + x_offset, int(y) + y_offset), 1, (0,0,255), -1)
+
+        for img in debug_image:
+            #img = cv2.cvtColor(((img / img.max()) * 255.0).astype(np.float32), cv2.COLOR_GRAY2BGR)
+            img = img.astype(np.float32)
+            img = (img-img.min())/(img.max()-img.min())*255.0
+            img = img.astype(np.uint8)
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            image = concatenate(image, img, horizontal=False)
         cv2.imshow("Press key", image)
 
         print text3, text2, text, "=", sum([x * 100.0 for x in out[0]]), image_path
-
 
         key = cv2.waitKey(0 if not do_all else 1) % (256*2)
     else:
@@ -82,10 +133,21 @@ while True:
         #print "Bien clasificado:", red, real
         key = 336
     total += 1
-    #print key
+
+    while key == 489:
+        key = cv2.waitKey(0) % (256*2)
 
     if key == ord('g'):
         do_all = not do_all
+    elif key == ord('s'):
+        import shutil
+        if not os.path.exists(os.path.join('copy', os.path.dirname(image_path))):
+            os.makedirs(os.path.join('copy', os.path.dirname(image_path)))
+
+        shutil.copyfile(image_path, os.path.join('copy', image_path))
+    elif key == 32:
+        continue
+    print key
 
     if key == 337:
         i -= 1
