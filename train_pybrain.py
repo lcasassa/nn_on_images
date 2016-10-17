@@ -1,3 +1,4 @@
+classification = False
 import os
 import cPickle as pickle
 from pybrain.tools.shortcuts import buildNetwork
@@ -6,11 +7,15 @@ from pybrain.tools.xml.networkwriter import NetworkWriter
 from pybrain.tools.xml.networkreader import NetworkReader
 #from pybrain.structure.modules import SoftmaxLayer
 #from pybrain.utilities import percentError
-from pybrain.datasets import ClassificationDataSet
+if classification:
+    from pybrain.datasets import ClassificationDataSet
+else:
+    from pybrain.datasets.supervised import SupervisedDataSet
 
 continue_training = False
-use_old_fitness = True
+use_old_fitness = False
 validation_percentage = 0.20
+
 
 import fitness
 
@@ -20,16 +25,19 @@ ds = None
 count = 0
 for input_data, output_data in fitness.getNextData(recalc=not use_old_fitness):
     if ds is None:
-        ds = ClassificationDataSet(len(input_data), nb_classes=len(fitness.outputsClass), class_labels=fitness.outputsClass)
+        if classification:
+            ds = ClassificationDataSet(len(input_data), nb_classes=len(fitness.outputsClass), class_labels=fitness.outputsClass)
+        else:
+            ds = SupervisedDataSet(len(input_data), len(output_data))
 
-    ds.addSample(input_data, [output_data])
+    ds.addSample(input_data, output_data)
     if count%10 == 0:
         print count,
     count += 1
 print ""
-ds._convertToOneOfMany()
-
-print "total count:", ds.calculateStatistics()
+if classification:
+    ds._convertToOneOfMany()
+    print "total count:", ds.calculateStatistics()
 
 print "indim:", ds.indim, "outdim:", ds.outdim, "rows:", ds.endmarker['input']
 
@@ -77,8 +85,13 @@ while True:
                 image = cv2.imread(image_path)
                 import feature
                 input_data = feature.calculate_feature(image_path)
-                ds = ClassificationDataSet(len(input_data), nb_classes=len(fitness.outputsClass), class_labels=fitness.outputsClass)
-                ds.appendLinked(input_data, [0])
+                if input_data is None:
+                    continue
+                if classification:
+                    ds = ClassificationDataSet(len(input_data), nb_classes=len(fitness.outputsClass), class_labels=fitness.outputsClass)
+                else:
+                    ds = SupervisedDataSet(len(input_data), len(feature.get_output(image_path)))
+                ds.addSample(input_data, [0])
                 output_data = fnn.activateOnDataset(ds)[0]
 
                 text = "%.1f      %.1f" % (output_data[0] * 100.0, output_data[1] * 100.0)

@@ -88,6 +88,22 @@ def imConvolve(imgc, kernel):
 def get_feature_size():
     return MAXDIM
 
+def get_input(image_path, return_image=False):
+    debug_image = []
+    image = cv2.imread(image_path)
+    imagel = image[0:100,140:175]
+    imager = image[0:100,845:880]
+    imagel = cv2.cvtColor(imagel, cv2.COLOR_BGR2LAB)[:,:,0]
+    imager = cv2.cvtColor(imager, cv2.COLOR_BGR2LAB)[:,:,0]
+
+    debug_image.append(imagel)
+    debug_image.append(imager)
+    input_data = np.concatenate((imagel.flatten(), imager.flatten()))
+    if return_image:
+        return input_data, debug_image
+    return input_data
+    #output_data os.path.basename(os.path.dirname(image_path)).replace(" ", "_")
+    #return [outputsClass.index(output_data)]
 
 def get_feature(image_path, values=[1,0,0,0,1,0], recalc=False, return_image=False):
     data_path = image_path.rsplit('.', 1)[0] + '.npy'
@@ -96,10 +112,353 @@ def get_feature(image_path, values=[1,0,0,0,1,0], recalc=False, return_image=Fal
 
     desp = calculate_feature(image_path, value=values, return_image=return_image)
 
-    np.save(data_path, desp)
+    if not (desp is None or desp[0] is None):
+        if return_image:
+            np.save(data_path, desp[0])
+        else:
+            np.save(data_path, desp)
     return desp
 
+def kmeans(img, K = 2):
+    Z = img.reshape((-1, 3))
 
+    # convert to np.float32
+    Z = np.float32(Z)
+
+    # define criteria, number of clusters(K) and apply kmeans()
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 7, 1.0)
+
+    ret, label, center = cv2.kmeans(Z, K, None, criteria, 5, cv2.KMEANS_RANDOM_CENTERS) # opencv 2
+    #ret, label, center = cv2.kmeans(Z, K, criteria, 5, cv2.KMEANS_RANDOM_CENTERS) # opencv 3
+
+    # Now convert back into uint8, and make original image
+    center = np.uint8(center)
+    res = center[label.flatten()]
+    res2 = res.reshape((img.shape))
+
+    #label = label.reshape((img.shape[0:2]))
+
+    return res2
+
+
+def auto_canny(image, lower=None, upper=None, sigma=0.33):
+    # compute the median of the single channel pixel intensities
+    v = np.median(image)
+
+    # apply automatic Canny edge detection using the computed median
+    if lower is None:
+        lower = int(max(0, (1.0 - sigma) * v))
+    if upper is None:
+        upper = int(min(255, (1.0 + sigma) * v))
+    edged = cv2.Canny(image, lower, upper)
+
+    # return the edged image
+    return edged
+
+
+def calculate_feature(image_path, value=[1,0,0,0,1,0], return_image=False):
+    debug_image = []
+    json_path = image_path.rsplit('.',1)[0] + '.json'
+    if not os.path.isfile(json_path):
+        features = None
+        if return_image:
+            return features, debug_image
+        return features
+
+    with open(json_path) as data_file:
+        data = json.load(data_file)
+
+    xl = []
+    yl = []
+    xr = []
+    yr = []
+    if len(data) == 48:
+        for i in xrange(len(data) / 6):
+            tmp = data[i * 6:i * 6 + 6]
+            xl.append(tmp[0][0])
+            yl.append(tmp[0][1])
+            xr.append(tmp[5][0])
+            yr.append(tmp[5][1])
+    elif len(data) == 8:
+        for i in xrange(len(data)):
+            if i<4:
+                xl.append(data[i][0])
+                yl.append(data[i][1])
+            else:
+                xr.append(data[i][0])
+                yr.append(data[i][1])
+    elif len(data) == 16:
+        if abs(data[0][0] - data[1][0]) < 100:
+            for i in xrange(len(data)):
+                if i < 8:
+                    xl.append(data[i][0])
+                    yl.append(data[i][1])
+                else:
+                    xr.append(data[i][0])
+                    yr.append(data[i][1])
+        else:
+            for i in xrange(len(data)):
+                if i % 2 == 0:
+                    xl.append(data[i][0])
+                    yl.append(data[i][1])
+                else:
+                    xr.append(data[i][0])
+                    yr.append(data[i][1])
+
+    from lmfit.models import LinearModel
+    modl = LinearModel()
+    parsl = modl.guess(xl, x=yl)
+    outl = modl.fit(xl, parsl, x=yl)
+    #print(outl.fit_report(min_correl=0.25))
+
+    ml = outl.best_values['slope']
+    bl = outl.best_values['intercept']
+
+
+    modr = LinearModel()
+    parsr = modr.guess(xr, x=yr)
+    outr = modr.fit(xr, parsr, x=yr)
+    #print(outr.fit_report(min_correl=0.25))
+
+    mr = outr.best_values['slope']
+    br = outr.best_values['intercept']
+
+    #x = m*y + b
+    def fl(y):
+        return int(ml*y+bl)
+
+    def fr(y):
+        return int(mr*y+br)
+
+
+    image = cv2.imread(image_path)
+    p1 = (fl(0), 0)
+    p2 = (fl(image.shape[0]), image.shape[0])
+    p3 = (fr(0), 0)
+    p4 = (fr(image.shape[0]), image.shape[0])
+
+    features = np.array([p1[0], p2[0], p3[0], p4[0]])
+
+    if return_image:
+        debug_image.extend(debug_feature(features, image_path))
+
+    if return_image:
+        return features, debug_image
+    return features
+
+
+def debug_feature(features, image_path):
+    #debug_image = []
+
+    input_data, debug_image = get_input(image_path, return_image=True)
+
+    print "size of input:", len(input_data)
+
+    image = cv2.imread(image_path)
+    p1 = (int(features[0]), 0)
+    p2 = (int(features[1]), image.shape[0])
+    p3 = (int(features[2]), 0)
+    p4 = (int(features[3]), image.shape[0])
+
+    cv2.line(image, p1, p2, (255,0,0), 1)
+    cv2.line(image, p3, p4, (255,0,0), 1)
+
+    cv2.circle(image, p1, 10, (0, 255, 255), -1)
+    cv2.circle(image, p2, 10, (0, 255, 255), -1)
+    cv2.circle(image, p3, 10, (0, 255, 255), -1)
+    cv2.circle(image, p4, 10, (0, 255, 255), -1)
+    #for i in xrange(len(xl)):
+    #    cv2.circle(image,(xl[i],yl[i]), 10, (0,0,255), -1)
+    #    cv2.circle(image,(xr[i],yr[i]), 10, (0,0,255), -1)
+    #debug_image.append(image)
+
+    pts1 = np.float32([p1,p2,p3,p4])
+    w = p4[1] - p1[1]
+    h = p4[0] - p1[0]
+    pts2 = np.float32([[0,0],[0,h],[w,0],[w,h]])
+    M = cv2.getPerspectiveTransform(pts1,pts2)
+    dst = cv2.warpPerspective(image, M, (w,h))
+    debug_image.append(dst)
+
+    return debug_image
+
+
+def calculate_feature2(image_path, value=[1,0,0,0,1,0], return_image=False):
+    debug_image = []
+    image = cv2.imread(image_path)
+
+    from detector_borde_plastico import detector_borde_plastico
+    image_bp, images_dp_debug = detector_borde_plastico(image)
+    debug_image.extend(images_dp_debug)
+
+    image_bottom = image_bp[int(0.7*image_bp.shape[0]):image_bp.shape[0],:,:]
+
+    #image_sharr = cv2.Scharr(image_bottom, cv2.CV_32F, 2, 0)
+
+    image_bottom_lab = cv2.cvtColor(image_bottom, cv2.COLOR_BGR2LAB)
+    #features = image_bottom_lab.flatten()[:500]
+    #debug_image.append(image_bottom_lab[:,:,0])
+    #debug_image.append(image_bottom_lab[:,:,2])
+    image_lab_a = image_bottom_lab[:, :, 1]
+    image_lab_b = image_bottom_lab[:, :, 2]
+    debug_image.append(image_lab_a)
+    debug_image.append(image_lab_b)
+
+    thresh = cv2.threshold(image_lab_a, 0, 255,
+                           cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+
+
+    #debug_image.append(thresh)
+
+    _, contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # bigest_area = amg
+    max_area = 0
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if max_area < area:
+            max_area = area
+            biggest_area = cnt
+    """
+    # points = [(100,h1[1][1]-h1[0][1]-5), (200, h1[1][1]-h1[0][1]-5), (300, h1[1][1]-h1[0][1]-5)]
+    bad = 0
+    good = 0
+    for x in xrange(0, th2.shape[1], 10):
+        p = (x, th2.shape[0] - 5)
+        if cv2.pointPolygonTest(biggest_area, p, False) <= 0:
+            bad += 1
+        else:
+            good += 1
+
+    # print "good:", good, "bad:", bad
+    isgood = False
+    if bad < 25:
+        isgood = True
+    """
+    mask_pasto = np.zeros(thresh.shape, np.uint8)
+    cv2.drawContours(mask_pasto, [biggest_area], 0, 255, 3)
+    debug_image.append(mask_pasto)
+
+    #features = [mask_pasto == 1]
+
+    """
+    image_kmeans = kmeans(image_bottom_lab, K=40)
+    image_kmeans_rgb = cv2.cvtColor(image_kmeans, cv2.COLOR_LAB2BGR)
+
+    debug_image.append(image_kmeans_rgb)
+
+    image_kmeans_rgb_cut = image_kmeans_rgb[0:image_kmeans_rgb.shape[0], int(image_kmeans_rgb.shape[1]*0.167):int(image_kmeans_rgb.shape[1]*0.905)]
+    debug_image.append(image_kmeans_rgb_cut)
+
+    image_kmeans2 = kmeans(image_kmeans_rgb_cut, K=5)
+    #image_kmeans2_rgb = cv2.cvtColor(image_kmeans2, cv2.COLOR_LAB2BGR)
+    debug_image.append(image_kmeans2)
+
+
+
+    lowerBound = np.array(value[0:3])*255.0
+    upperBound = np.array(value[3:6])*255.0
+
+    # this gives you the mask for those in the ranges you specified,
+    # but you want the inverse, so we'll add bitwise_not...
+    image_inrange = cv2.inRange(image_kmeans2, lowerBound, upperBound)
+    image_inrange_color = cv2.bitwise_not(image_kmeans_rgb_cut, mask=image_inrange)
+    debug_image.append(image_inrange_color)
+
+    """
+
+
+    """
+    cv2.kmeans(image_bottom_lab, 40, )
+    from sklearn.cluster import MiniBatchKMeans
+    image_bottom_lab_reshape = image_bottom_lab.reshape((image_bottom_lab.shape[0] * image_bottom_lab.shape[1], 3))
+    clt = MiniBatchKMeans(n_clusters=10)
+    labels = clt.fit_predict(image_bottom_lab_reshape)
+    quant = clt.cluster_centers_.astype("uint8")[labels]
+    quant = quant.reshape(image_bottom_lab.shape)
+    image_bottom_lab_res = image_bottom_lab_reshape.reshape(image_bottom_lab.shape)
+
+    # convert from L*a*b* to RGB
+    quant = cv2.cvtColor(quant, cv2.COLOR_LAB2BGR)
+    image_bottom_lab_res = cv2.cvtColor(image_bottom_lab_res, cv2.COLOR_LAB2BGR)
+
+
+    sobelx64f = cv2.Sobel(image_bottom, cv2.CV_64F, 1, 0, ksize=3)
+    abs_sobel64f = np.absolute(sobelx64f)
+    sobel_8u = np.uint8(abs_sobel64f)
+
+    lowerBound = np.array(value[0:3])*255.0
+    upperBound = np.array(value[3:6])*255.0
+
+    # this gives you the mask for those in the ranges you specified,
+    # but you want the inverse, so we'll add bitwise_not...
+    image_inrange = cv2.inRange(sobel_8u, lowerBound, upperBound)
+    image_inrange_color = cv2.bitwise_not(image_bottom, mask=image_inrange)
+
+
+    features = image.flatten()[:500]
+    debug_image.append(image_bottom)
+    debug_image.append(sobel_8u)
+    debug_image.append(image_inrange)
+    debug_image.append(image_inrange_color)
+    debug_image.append(quant)
+    debug_image.append(image_bottom_lab_res)
+    """
+
+    x = []
+    y = []
+    for x_ in xrange(mask_pasto.shape[1]):
+        for y_ in xrange(10, mask_pasto.shape[0]):
+            if mask_pasto[y_,x_] == 255:
+                x.append(x_)
+                y.append(y_)
+                break
+
+
+
+    x = np.array(x)
+    y = np.array(y)
+
+    x1 = x[x<(mask_pasto.shape[1]/2)]
+    y1 = y[x<(mask_pasto.shape[1]/2)]
+    x1 = x1[y1>(mask_pasto.shape[0]/2)]
+    y1 = y1[y1>(mask_pasto.shape[0]/2)]
+    y1 = y1.max() - y1
+    x = x-x[0] # x offset
+
+    mask_pasto2 = np.zeros(thresh.shape, np.uint8)
+    for i in xrange(len(x1)):
+        mask_pasto2[y1[i], x1[i]] = 255
+    debug_image.append(mask_pasto2)
+
+
+
+    x2 = x[x>(mask_pasto.shape[1]/2)]
+    y2 = y[x>(mask_pasto.shape[1]/2)]
+    y2 = y2 - y2.max()
+
+
+    from lmfit.models import ExponentialModel
+
+    exp_mod = ExponentialModel(prefix='exp_')
+    pars = exp_mod.guess(y1, x=x1)
+
+    out = exp_mod.fit(y, pars, x=x)
+
+    print "error en amplitud:", out.params['exp_amplitude'].stderr,
+    print "error en decay:", out.params['exp_decay'].stderr,
+
+    features = np.array([out.best_values['exp_decay'], out.params['exp_decay'].stderr])
+
+    #print(out.fit_report(min_correl=0.5))
+
+    #print pars
+
+    if return_image:
+        return features, debug_image
+    return features
+
+"""
 def calculate_feature(image_path, value=[1,0,0,0,1,0], return_image=False):
     debug_image = []
     vmin = 0
@@ -216,16 +575,6 @@ def calculate_feature(image_path, value=[1,0,0,0,1,0], return_image=False):
 
     desp = getMaxActivated(im_left, MAXDIM)
 
-    """
-    fig, ax = plt.subplots()
-    ax.imshow(im_left, cmap='gray')
-    for i in range(np.size(desp)):
-        xcord = np.floor(desp[i] / dimy)
-        ycord = desp[i] % dimy
-        # print '\t(', i, ') ', desp[k,i], xcord, ycord
-        ax.scatter([ycord], [xcord], marker='x', color='r')
-    plt.show()
-    """
     for i in xrange(len(debug_image)):
         debug_image[i] = cv2.resize(debug_image[i], None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
 
@@ -233,7 +582,7 @@ def calculate_feature(image_path, value=[1,0,0,0,1,0], return_image=False):
         return (desp, debug_image)
 
     return desp
-
+"""
 
 if __name__ == "__main__":
     print get_feature("/home/linus/innovaxxion/NEAT/python/examples/images/data/nodulo/20160721014112_0_17_full_image.jpg")

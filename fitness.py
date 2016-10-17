@@ -1,9 +1,6 @@
-import neat
-import cv2
+#import cv2
 import glob
 import os
-import json
-import numpy as np
 import feature
 
 
@@ -12,7 +9,7 @@ outputsAmount = 0
 images_path = []
 outputsClass = []
 
-
+"""
 def crop(image, y):
     x1 = 0
     x2 = image.shape[1]
@@ -22,7 +19,7 @@ def crop(image, y):
     crop_image_res = cv2.resize(crop_image, None, fx=0.2, fy=0.2, interpolation = cv2.INTER_CUBIC)
     crop_image_res = cv2.cvtColor(crop_image_res, cv2.COLOR_BGR2HSV)
     return crop_image_res[:,:,0]
-
+"""
 
 def setData(images_path_):
     global inputsAmount, outputsAmount, images_path, outputsClass
@@ -41,7 +38,7 @@ def setData(images_path_):
     outputsAmount = len(outputsClass)
 
 
-def getNextData(recalc=False):
+def getNextData(recalc=False, return_image_path=False, use_images_without_output=False):
     for image_path in images_path:
         """
         json_path = image_path.rsplit('.')[0] + '.json'
@@ -60,11 +57,17 @@ def getNextData(recalc=False):
             #print "image shape:", image.shape, crop.shape
             yield (image, x)
         """
-        input_data = feature.get_feature(image_path, recalc=recalc)
-        output_data = os.path.basename(os.path.dirname(image_path)).replace(" ", "_")
-        yield (input_data, outputsClass.index(output_data))
+        input_data = feature.get_input(image_path)
+        output_data = feature.get_feature(image_path, recalc=recalc)
+        if output_data is None and not use_images_without_output:
+            continue
 
+        if return_image_path:
+            yield (input_data, output_data, image_path)
+        else:
+            yield (input_data, output_data)
 
+"""
 def experiment( orgm, verbose = False ):
     #import ipdb; ipdb.set_trace()
     error = 0
@@ -89,7 +92,7 @@ def experiment( orgm, verbose = False ):
     if verbose:
         print "fitness: ", fitness
     return fitness
-
+"""
 
 if __name__ == "__main__":
     setData("data/**/*.jpg")
