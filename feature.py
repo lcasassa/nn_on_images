@@ -8,6 +8,7 @@ import mdp
 import os
 import json
 import cv2
+import detector_catodo
 
 MAXDIM = 500
 
@@ -84,204 +85,34 @@ def imConvolve(imgc, kernel):
 
 # ---------------------------------------------------
 # ---------------------------------------------------
+import detector_cobre
 
 def get_feature_size():
     return MAXDIM
 
 def get_input(image_path, return_image=False):
-    debug_image = []
-    image = cv2.imread(image_path)
-    imagel = image[0:100,140:175]
-    imager = image[0:100,845:880]
-    imagel = cv2.cvtColor(imagel, cv2.COLOR_BGR2LAB)[:,:,0]
-    imager = cv2.cvtColor(imager, cv2.COLOR_BGR2LAB)[:,:,0]
+    if False:
+        return detector_catodo.get_input(image_path, return_image)
+    else:
+        image = cv2.imread(image_path)
+        feature = detector_catodo.get_feature(image_path)
+        image_catodo = detector_catodo.apply_feature(feature, image)
+        return_values = detector_cobre.get_input(image_catodo, return_image=return_image)
+        return return_values
 
-    debug_image.append(imagel)
-    debug_image.append(imager)
-    input_data = np.concatenate((imagel.flatten(), imager.flatten()))
-    if return_image:
-        return input_data, debug_image
-    return input_data
     #output_data os.path.basename(os.path.dirname(image_path)).replace(" ", "_")
     #return [outputsClass.index(output_data)]
 
 def get_feature(image_path, values=[1,0,0,0,1,0], recalc=False, return_image=False):
-    data_path = image_path.rsplit('.', 1)[0] + '.npy'
-    if not recalc and os.path.isfile(data_path):
-        return np.load(data_path)
-
-    desp = calculate_feature(image_path, value=values, return_image=return_image)
-
-    if not (desp is None or desp[0] is None):
-        if return_image:
-            np.save(data_path, desp[0])
-        else:
-            np.save(data_path, desp)
-    return desp
-
-def kmeans(img, K = 2):
-    Z = img.reshape((-1, 3))
-
-    # convert to np.float32
-    Z = np.float32(Z)
-
-    # define criteria, number of clusters(K) and apply kmeans()
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 7, 1.0)
-
-    ret, label, center = cv2.kmeans(Z, K, None, criteria, 5, cv2.KMEANS_RANDOM_CENTERS) # opencv 2
-    #ret, label, center = cv2.kmeans(Z, K, criteria, 5, cv2.KMEANS_RANDOM_CENTERS) # opencv 3
-
-    # Now convert back into uint8, and make original image
-    center = np.uint8(center)
-    res = center[label.flatten()]
-    res2 = res.reshape((img.shape))
-
-    #label = label.reshape((img.shape[0:2]))
-
-    return res2
-
-
-def auto_canny(image, lower=None, upper=None, sigma=0.33):
-    # compute the median of the single channel pixel intensities
-    v = np.median(image)
-
-    # apply automatic Canny edge detection using the computed median
-    if lower is None:
-        lower = int(max(0, (1.0 - sigma) * v))
-    if upper is None:
-        upper = int(min(255, (1.0 + sigma) * v))
-    edged = cv2.Canny(image, lower, upper)
-
-    # return the edged image
-    return edged
+    return detector_catodo.get_feature(image_path, values, recalc, return_image)
 
 
 def calculate_feature(image_path, value=[1,0,0,0,1,0], return_image=False):
-    debug_image = []
-    json_path = image_path.rsplit('.',1)[0] + '.json'
-    if not os.path.isfile(json_path):
-        features = None
-        if return_image:
-            return features, debug_image
-        return features
-
-    with open(json_path) as data_file:
-        data = json.load(data_file)
-
-    xl = []
-    yl = []
-    xr = []
-    yr = []
-    if len(data) == 48:
-        for i in xrange(len(data) / 6):
-            tmp = data[i * 6:i * 6 + 6]
-            xl.append(tmp[0][0])
-            yl.append(tmp[0][1])
-            xr.append(tmp[5][0])
-            yr.append(tmp[5][1])
-    elif len(data) == 8:
-        for i in xrange(len(data)):
-            if i<4:
-                xl.append(data[i][0])
-                yl.append(data[i][1])
-            else:
-                xr.append(data[i][0])
-                yr.append(data[i][1])
-    elif len(data) == 16:
-        if abs(data[0][0] - data[1][0]) < 100:
-            for i in xrange(len(data)):
-                if i < 8:
-                    xl.append(data[i][0])
-                    yl.append(data[i][1])
-                else:
-                    xr.append(data[i][0])
-                    yr.append(data[i][1])
-        else:
-            for i in xrange(len(data)):
-                if i % 2 == 0:
-                    xl.append(data[i][0])
-                    yl.append(data[i][1])
-                else:
-                    xr.append(data[i][0])
-                    yr.append(data[i][1])
-
-    from lmfit.models import LinearModel
-    modl = LinearModel()
-    parsl = modl.guess(xl, x=yl)
-    outl = modl.fit(xl, parsl, x=yl)
-    #print(outl.fit_report(min_correl=0.25))
-
-    ml = outl.best_values['slope']
-    bl = outl.best_values['intercept']
-
-
-    modr = LinearModel()
-    parsr = modr.guess(xr, x=yr)
-    outr = modr.fit(xr, parsr, x=yr)
-    #print(outr.fit_report(min_correl=0.25))
-
-    mr = outr.best_values['slope']
-    br = outr.best_values['intercept']
-
-    #x = m*y + b
-    def fl(y):
-        return int(ml*y+bl)
-
-    def fr(y):
-        return int(mr*y+br)
-
-
-    image = cv2.imread(image_path)
-    p1 = (fl(0), 0)
-    p2 = (fl(image.shape[0]), image.shape[0])
-    p3 = (fr(0), 0)
-    p4 = (fr(image.shape[0]), image.shape[0])
-
-    features = np.array([p1[0], p2[0], p3[0], p4[0]])
-
-    if return_image:
-        debug_image.extend(debug_feature(features, image_path))
-
-    if return_image:
-        return features, debug_image
-    return features
+    return detector_catodo.calculate_feature(image_path, value, return_image)
 
 
 def debug_feature(features, image_path):
-    #debug_image = []
-
-    input_data, debug_image = get_input(image_path, return_image=True)
-
-    print "size of input:", len(input_data)
-
-    image = cv2.imread(image_path)
-    p1 = (int(features[0]), 0)
-    p2 = (int(features[1]), image.shape[0])
-    p3 = (int(features[2]), 0)
-    p4 = (int(features[3]), image.shape[0])
-
-    cv2.line(image, p1, p2, (255,0,0), 1)
-    cv2.line(image, p3, p4, (255,0,0), 1)
-
-    cv2.circle(image, p1, 10, (0, 255, 255), -1)
-    cv2.circle(image, p2, 10, (0, 255, 255), -1)
-    cv2.circle(image, p3, 10, (0, 255, 255), -1)
-    cv2.circle(image, p4, 10, (0, 255, 255), -1)
-    #for i in xrange(len(xl)):
-    #    cv2.circle(image,(xl[i],yl[i]), 10, (0,0,255), -1)
-    #    cv2.circle(image,(xr[i],yr[i]), 10, (0,0,255), -1)
-    #debug_image.append(image)
-
-    pts1 = np.float32([p1,p2,p3,p4])
-    w = p4[1] - p1[1]
-    h = p4[0] - p1[0]
-    pts2 = np.float32([[0,0],[0,h],[w,0],[w,h]])
-    M = cv2.getPerspectiveTransform(pts1,pts2)
-    dst = cv2.warpPerspective(image, M, (w,h))
-    debug_image.append(dst)
-
-    return debug_image
-
+    return detector_catodo.debug_feature(features, image_path)
 
 def calculate_feature2(image_path, value=[1,0,0,0,1,0], return_image=False):
     debug_image = []
